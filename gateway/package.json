@@ -1,0 +1,20 @@
+{
+  "name": "productproof-gateway",
+  "private": true,
+  "version": "2.1.0",
+  "description": "Express API gateway for the ProductProof AI verification service",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^2.5.0"
+  }
+}

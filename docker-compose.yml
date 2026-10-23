@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    env_file: [./backend/.env]
+    volumes: [./backend/data:/app/data]
+  gateway:
+    build: ./gateway
+    ports: ["4000:4000"]
+    environment:
+      FASTAPI_URL: http://backend:8000
+      PORT: 4000
+    depends_on: [backend]
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+    depends_on: [gateway]
+  seller:
+    build: ./seller-portal
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:4000/api/v1
+    depends_on: [gateway]

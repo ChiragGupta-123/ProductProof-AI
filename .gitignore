@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.freebuff/
+*.pyc
+node_modules/
+.next/
+dist/
+backend/data/uploads/
+backend/data/models/
+*.pt
+*.log
