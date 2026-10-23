@@ -128,6 +128,67 @@ The backend tests run offline (no Gemini/Groq/Mongo/CLIP calls). Gateway tests
 start a fake upstream and assert multipart forwarding, input limits and origin
 checks.
 
+## Deployment with Docker Compose
+
+The repo ships a production `docker-compose.yml`. Use a VM with Docker and at
+least 4 GB of RAM (8 GB recommended): OCR, CLIP and YOLO load together on the
+first request, and roughly 800 MB of model weights download on first boot.
+
+```bash
+git clone https://github.com/ChiragGupta-123/ProductProof-AI.git
+cd ProductProof-AI
+cp backend/.env.example backend/.env   # MONGODB_URI, GOOGLE_API_KEY, GROQ_API_KEY
+cp .env.example .env                   # origins and hostnames - no secrets
+docker compose up -d --build
+```
+
+What that starts:
+
+- `backend` is published on `127.0.0.1:8000` **only**. The gateway is its sole
+  caller, and the ML service has no authentication of its own.
+- `gateway` (`:4000`), the admin app (`:3000`) and the seller portal (`:5173`)
+  are public. The gateway is the browser's API origin, so it must be reachable.
+- Model weights and uploads persist in the `backend_data` named volume.
+- Every service has a health check and `restart: unless-stopped`.
+
+For a real domain, set the URL variables in `.env` **before building** - the
+frontends inline `NEXT_PUBLIC_API_URL` / `VITE_API_URL` into their bundles at
+build time, so changing them later means rebuilding:
+
+```bash
+NEXT_PUBLIC_API_URL=https://api.example.com/api/v1
+VITE_API_URL=https://api.example.com/api/v1
+ALLOWED_ORIGINS=https://admin.example.com,https://seller.example.com
+ADMIN_DOMAIN=admin.example.com
+SELLER_DOMAIN=seller.example.com
+API_DOMAIN=api.example.com
+docker compose up -d --build
+```
+
+TLS is provided by the bundled Caddy service, which is opt-in:
+
+```bash
+docker compose --profile https up -d
+```
+
+Create the Atlas vector index and seed trusted knowledge once the backend is up:
+
+```bash
+docker compose exec backend python scripts/create_vector_index.py
+docker compose exec backend python scripts/seed_demo.py
+```
+
+Useful checks after a deploy:
+
+```bash
+docker compose ps                     # every service should be healthy
+curl -s http://localhost:4000/health  # gateway + backend together
+curl -s http://localhost:8000/api/v1/system-status
+```
+
+The first verification after startup takes about 2 minutes while models load;
+subsequent requests are roughly 8 seconds.
+
 ## MongoDB Atlas Vector Search index
 
 The included `create_vector_index.py` creates a vectorSearch index over:
@@ -186,7 +247,11 @@ Seller Portal / Admin UI
   multer 2.x line.
 - Uploaded images are validated by decoding and are deleted after each request; only review
   metadata is persisted.
-- Use HTTPS in deployment.
+- Use HTTPS in deployment. `docker compose --profile https up -d` terminates TLS
+  with the bundled Caddyfile; firewall ports 3000/4000/5173 when it is enabled
+  so only 80/443 are reachable.
+- The backend is bound to loopback in `docker-compose.yml`; only the gateway can
+  reach it.
 - **Authentication/RBAC is still not implemented.** Anyone who can reach the gateway can run
   verifications and override review decisions. Put the admin panel behind an authenticated
   proxy or add auth before exposing it publicly.

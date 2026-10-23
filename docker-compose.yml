@@ -1,23 +1,81 @@
 services:
   backend:
     build: ./backend
-    ports: ["8000:8000"]
+    restart: unless-stopped
     env_file: [./backend/.env]
-    volumes: [./backend/data:/app/data]
+    environment:
+      # Keep uploads inside the mounted volume so the per-request cleanup
+      # target and the model cache both survive a container replacement.
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - backend_data:/app/data
+    # Loopback only: nothing outside this host needs to reach the ML service,
+    # and it has no authentication of its own.
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      # Liveness, not readiness: "/" never touches MongoDB, so a bad Atlas URI
+      # cannot put the container in a restart loop.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   gateway:
     build: ./gateway
-    ports: ["4000:4000"]
+    restart: unless-stopped
     environment:
       FASTAPI_URL: http://backend:8000
       PORT: 4000
-    depends_on: [backend]
+      # With NODE_ENV=production the gateway drops its loopback-origin
+      # allowance, so every real browser origin must be listed here.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    ports: ["4000:4000"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # Inlined into the client bundle at build time.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api/v1}
+    restart: unless-stopped
     ports: ["3000:3000"]
     depends_on: [gateway]
+
   seller:
-    build: ./seller-portal
-    ports: ["5173:5173"]
-    environment:
-      VITE_API_URL: http://localhost:4000/api/v1
+    build:
+      context: ./seller-portal
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000/api/v1}
+    restart: unless-stopped
+    # The container serves the built bundle from nginx on 80.
+    ports: ["5173:80"]
     depends_on: [gateway]
+
+  # Optional TLS terminator. Opt in with:  docker compose --profile https up -d
+  # Hostnames default to *.localhost, which resolve to 127.0.0.1 in browsers
+  # and need no certificates, so the profile can be exercised before DNS exists.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [frontend, seller, gateway]
+
+volumes:
+  backend_data:
+  caddy_data:
+  caddy_config:

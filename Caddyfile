@@ -1,0 +1,19 @@
+# TLS terminator for the optional `docker compose --profile https up -d` setup.
+# Hostnames come from the environment so the same file works for a real domain
+# and for local *.localhost names that need no certificates.
+
+{$ADMIN_DOMAIN:admin.localhost} {
+	encode gzip
+	reverse_proxy frontend:3000
+}
+
+{$SELLER_DOMAIN:seller.localhost} {
+	encode gzip
+	reverse_proxy seller:80
+}
+
+# The gateway is the browser's API origin, so it must terminate TLS too -
+# mixed content would otherwise block uploads from an HTTPS page.
+{$API_DOMAIN:api.localhost} {
+	reverse_proxy gateway:4000
+}
